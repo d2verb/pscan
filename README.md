@@ -1,5 +1,5 @@
 # pscan - a simple port scanner
-pscan is a simple port scanner. not working. Tested on Linux (container on macOS). Doesn't work on macOS.
+pscan is a simple port scanner. Tested on Linux (container on macOS). Doesn't work on macOS.
 
 ## Installation
 ```
