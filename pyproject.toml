@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "pscan"
+version = "0.1.0"
+description = ""
+authors = ["d2verb"]
+
+[tool.poetry.dependencies]
+python = "^3.8"
+
+[tool.poetry.dev-dependencies]
+
+[tool.poetry.scripts]
+pscan = "pscan.main:main"
+
+[build-system]
+requires = ["poetry>=0.12"]
+build-backend = "poetry.masonry.api"
