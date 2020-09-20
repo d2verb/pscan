@@ -12,9 +12,6 @@ class PortScanner:
         else:
             self.ports = port
 
-        self.scanned = defaultdict(lambda: False)
-        self.sport = randint(49152, 65535)
-        
         try:
             self.myip = socket.gethostbyname(socket.gethostname())
             if targetip == "127.0.0.1":
@@ -23,74 +20,67 @@ class PortScanner:
             self.myip = "127.0.0.1"
 
         self.targetip = targetip
+        self.send_sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_TCP)
+        self.recv_sock = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_TCP)
+        self.scanned = defaultdict(lambda: False)
+        self.sport = 49152
     
     def scan(self):
         print(f"Scanning {self.targetip}...")
 
-        sniff = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_TCP)
-        sniff.bind((self.myip, 0))
+        recv_thread = threading.Thread(target=self.packet_recv)
+        recv_thread.setDaemon(True)
+        recv_thread.start()
 
-        sniffer_thread = threading.Thread(target=self.packet_sniffer, args=(sniff,))
-        sniffer_thread.setDaemon(True)
-        sniffer_thread.start()
+        send_thread = threading.Thread(target=self.packet_send)
+        send_thread.setDaemon(True)
+        send_thread.start()
 
+        send_thread.join(5)
+        recv_thread.join(5)
+
+    def packet_send(self):
         for port in self.ports:
-            thread = threading.Thread(target=self.packet_sender,args=(port,))
-            thread.setDaemon(True)
-            thread.start()
+            # send SYN packet
+            self.send(self.sport, port, "S")
+            self.sport += 1
 
-        sniffer_thread.join(5)
-
-    def packet_sniffer(self, sniff):
+    def packet_recv(self):
         n_ports = len(self.ports)
         while n_ports != 0:
-            data = sniff.recvfrom(65565)[0]
+            data = self.recv_sock.recv(65565)
 
             ip = IP.load(data[:IP.size()])
+            tcp = TCP.load(data[IP.size():IP.size()+TCP.size()])
 
-            # check IP address
-            if ip.src != self.targetip:
+            if ip.src != self.targetip or ip.dst != self.myip:
                 continue
 
-            if ip.dst != self.myip:
-                continue
-
-            data = data[IP.size():]
-            tcp = TCP.load(data[:TCP.size()])
-
-            # check port
-            if tcp.dport != self.sport:
-                continue
-            
-            # check SYN-ACK
-            if tcp.flags != "SA":
+            if tcp.dport < 49152 or tcp.flags != "SA":
                 continue
 
             if self.scanned[tcp.sport]:
                 continue
 
-            try:
-                service_name = socket.getservbyport(tcp.sport, "tcp")
-            except OSError:
-                service_name = "unknown"
+            # received SYN-ACK packet
+            self.dump_status(tcp.sport, "open")
 
-            print(f"{tcp.sport}/{service_name} : open")
-
-            self.scanned[tcp.sport] = True
             n_ports -= 1
+            self.scanned[tcp.sport] = True
 
-        sniff.close()
+            # send RST packet
+            self.send(tcp.dport, tcp.sport, "R")
 
-    def packet_sender(self, port):
-        # Send SYN packet
-        head = TCP(sport=self.sport, dport=port, flags="S")
+    def send(self, sport, dport, flags):
+        head = TCP(sport=sport, dport=dport, flags=flags)
         head.update_chksum(saddr=self.myip, daddr=self.targetip)
+        self.send_sock.sendto(head.bytes(), (self.targetip, dport))
 
-        sender = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_TCP)
-        sender.sendto(head.bytes(), (self.targetip, port))
+    def dump_status(self, port, status):
+        try:
+            service_name = socket.getservbyport(port, "tcp")
+        except OSError:
+            service_name = "unknown"
 
-        sender.close()
-
-if __name__ == "__main__":
-    s = PortScanner(port=80)
-    s.scan()
+        port_info = f"{port:5}/{service_name}"
+        print(f"{port_info:15} : {status}")
